@@ -19,11 +19,11 @@ Developed using Claude Fable 5 as a pair programmer, deployed and maintained ind
 
 That creates one table (`kv`) with row-level security, so only you can read your own rows — even with the public API key.
 
-### 2. Get your API keys
-
-1. In Supabase: **Project Settings → API**
-2. Copy the **Project URL** and the **anon public** key
-3. In this project folder, copy `.env.example` to `.env` and paste both values in
+2. Get your API keys
+In Supabase: Settings → API Keys → if there's no key yet, click Create new API keys
+Copy the Publishable key (sb_publishable_...) — this goes in .env as VITE_SUPABASE_ANON_KEY (legacy variable name, new key works as a drop-in)
+For the Project URL: click Connect at the top of the dashboard, or grab your project ref from the dashboard address bar — it's https://YOUR-REF.supabase.co
+Don't copy anything labeled Secret key or service_role — those bypass your security and never belong in frontend code.
 
 ### 3. Run it locally (optional but recommended)
 
