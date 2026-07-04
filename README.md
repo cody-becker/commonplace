@@ -4,6 +4,8 @@ A private life ledger — notes, tasks, and goals — that syncs across your pho
 
 Stack: React (Vite) + Supabase (Postgres + auth) + Vercel. All free tier.
 
+Developed using Claude Fable 5 as a pair programmer, deployed and maintained independently
+
 ---
 
 ## Setup (~30 minutes, one time)
