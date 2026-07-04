@@ -4,7 +4,7 @@ A private life ledger — notes, tasks, and goals — that syncs across your pho
 
 Stack: React (Vite) + Supabase (Postgres + auth) + Vercel. All free tier.
 
-Developed using Claude Fable 5 as a pair programmer, deployed and maintained independently
+Developed using Claude Fable 5 as a pair programmer, deployed and maintained independently. Architecture decisions, deployment, and debugging by me.
 
 ---
 
@@ -97,6 +97,7 @@ Row-level security means the anon key in the frontend is safe to expose — Post
 
 ## Troubleshooting
 
+- **Make sure you extracted the zip / you're in the folder containing package.json" and "white screen = .env missing or misnamed; restart the dev server after creating it**
 - **"Missing Supabase config" on load** → your `.env` (local) or Vercel env vars (prod) aren't set
 - **Magic link email never arrives** → check spam; Supabase free tier limits auth emails to ~3–4/hour
 - **Link opens but you're not signed in** → Site URL / Redirect URLs in Supabase don't match where you opened it
