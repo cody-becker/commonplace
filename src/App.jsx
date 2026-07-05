@@ -127,14 +127,14 @@ function SignIn() {
           </button>
           {err && <p style={{ marginTop: 10, fontSize: 13, color: C.danger }}>{err}</p>}
           <p style={{ marginTop: 14, fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>
-            No password. A 6-digit code lands in your inbox — type it here and you're in.
+            No password. A one-time code lands in your inbox — type it here and you're in.
           </p>
         </div>
       ) : (
         <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 18 }}>
           <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: "0.1em", color: C.sage }}>CODE SENT</div>
           <p style={{ margin: "8px 0 12px", fontSize: 14.5, color: C.ink }}>
-            Check <strong>{email}</strong> for a 6-digit code and enter it below.
+            Check <strong>{email}</strong> for a sign-in code and enter it below.
           </p>
           <label htmlFor="code" style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.12em", color: C.muted }}>
             CODE
@@ -145,10 +145,10 @@ function SignIn() {
             inputMode="numeric"
             autoComplete="one-time-code"
             value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
             onKeyDown={(e) => e.key === "Enter" && verify()}
-            placeholder="000000"
-            style={{ ...inputStyle, fontFamily: mono, fontSize: 22, letterSpacing: "0.35em", textAlign: "center" }}
+            placeholder="00000000"
+            style={{ ...inputStyle, fontFamily: mono, fontSize: 20, letterSpacing: "0.22em", textAlign: "center" }}
           />
           <button onClick={verify} disabled={busy || code.length < 6} style={btnStyle(busy || code.length < 6)}>
             {busy ? "CHECKING…" : "Sign in"}
