@@ -269,7 +269,7 @@ export default function Commonplace({ userId, onSignOut }) {
         ) : view === "tasks" ? (
           <Tasks tasks={tasks} update={updateTasks} />
         ) : view === "calendar" ? (
-          <Calendar events={events} update={updateEvents} />
+          <Calendar events={events} update={updateEvents} tasks={tasks} updateTasks={updateTasks} />
         ) : (
           <Goals goals={goals} update={updateGoals} />
         )}
@@ -301,7 +301,7 @@ function Today({
 }) {
   const [capture, setCapture] = useState("");
   const [captured, setCaptured] = useState(false);
-  const open = tasks.filter((t) => !t.done).slice(0, 5);
+  const open = tasks.filter((t) => !t.done).sort(byDue).slice(0, 5);
   const recent = notes.slice(0, 2);
   const nowGoals = goals.filter((g) => g.horizon === "now" && !g.done);
   const tk = dateKey();
@@ -616,7 +616,7 @@ function Journal({ journal, update }) {
 // CALENDAR — month grid + upcoming
 // ————————————————————————————————————————————
 
-function Calendar({ events, update }) {
+function Calendar({ events, update, tasks, updateTasks }) {
   const today = dateKey();
   const [cursor, setCursor] = useState(() => {
     const n = new Date();
@@ -634,6 +634,7 @@ function Calendar({ events, update }) {
 
   const byDate = {};
   for (const e of events) byDate[e.date] = (byDate[e.date] || 0) + 1;
+  for (const t of tasks) if (t.due && !t.done) byDate[t.due] = (byDate[t.due] || 0) + 1;
 
   const cells = [];
   for (let i = 0; i < firstDow; i++) cells.push(null);
@@ -654,8 +655,14 @@ function Calendar({ events, update }) {
     .filter((e) => e.date === sel)
     .sort((a, b) => (a.time || "99").localeCompare(b.time || "99"));
 
-  const upcoming = events
-    .filter((e) => e.date >= today)
+  const dayTasks = tasks
+    .filter((t) => t.due === sel)
+    .sort((a, b) => Number(a.done) - Number(b.done));
+
+  const upcoming = [
+    ...events.filter((e) => e.date >= today).map((e) => ({ ...e, kind: "event" })),
+    ...tasks.filter((t) => t.due && !t.done && t.due >= today).map((t) => ({ id: t.id, title: t.title, date: t.due, time: null, kind: "task" })),
+  ]
     .sort((a, b) => (a.date + (a.time || "99")).localeCompare(b.date + (b.time || "99")))
     .slice(0, 8);
 
@@ -710,7 +717,27 @@ function Calendar({ events, update }) {
 
       {/* selected day */}
       <Section title={sel === today ? "TODAY" : fmtShort(sel)}>
-        {dayEvents.length === 0 ? (
+        {dayTasks.map((t) => (
+          <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 2px", borderBottom: `1px solid ${C.line}` }}>
+            <button
+              onClick={() => updateTasks(tasks.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)))}
+              aria-label={t.done ? "Mark not done" : "Mark done"}
+              style={{
+                width: 18, height: 18, borderRadius: 5, flexShrink: 0, cursor: "pointer",
+                border: `1.5px solid ${t.done ? C.sage : C.faint}`,
+                background: t.done ? C.sage : "transparent",
+                color: C.surface, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              {t.done ? "✓" : ""}
+            </button>
+            <span style={{ flex: 1, fontSize: 15, color: t.done ? C.faint : C.ink, textDecoration: t.done ? "line-through" : "none" }}>
+              {t.title}
+            </span>
+            <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: "0.08em", color: C.faint }}>DUE</span>
+          </div>
+        ))}
+        {dayEvents.length === 0 && dayTasks.length === 0 ? (
           <Empty>Nothing planned. Some of the best days aren't.</Empty>
         ) : (
           dayEvents.map((e) => (
@@ -768,7 +795,10 @@ function Calendar({ events, update }) {
               <span style={{ fontFamily: mono, fontSize: 10.5, color: e.date === today ? C.accent : C.faint, whiteSpace: "nowrap" }}>
                 {e.date === today ? "TODAY" : fmtShort(e.date)}{e.time ? ` · ${fmtTime(e.time)}` : ""}
               </span>
-              <span style={{ fontSize: 15 }}>{e.title}</span>
+              <span style={{ fontSize: 15, flex: 1 }}>{e.title}</span>
+              {e.kind === "task" && (
+                <span style={{ fontFamily: mono, fontSize: 9.5, letterSpacing: "0.1em", color: C.faint, border: `1px solid ${C.line}`, borderRadius: 4, padding: "1px 5px" }}>TASK</span>
+              )}
             </button>
           ))}
         </Section>
@@ -901,24 +931,33 @@ function NoteEditor({ note, onChange, onDelete, onBack }) {
 
 function Tasks({ tasks, update }) {
   const [draft, setDraft] = useState("");
-  const open = tasks.filter((t) => !t.done);
+  const [due, setDue] = useState("");
+  const open = tasks.filter((t) => !t.done).sort(byDue);
   const done = tasks.filter((t) => t.done);
 
   const add = () => {
     if (!draft.trim()) return;
-    update([{ id: uid(), title: draft.trim(), done: false, created: Date.now() }, ...tasks]);
+    update([{ id: uid(), title: draft.trim(), done: false, due: due || null, created: Date.now() }, ...tasks]);
     setDraft("");
+    setDue("");
   };
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
           placeholder="Add a task"
-          style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 14, color: C.ink }}
+          style={{ flex: "2 1 160px", padding: "10px 14px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 14, color: C.ink }}
+        />
+        <input
+          type="date"
+          value={due}
+          onChange={(e) => setDue(e.target.value)}
+          aria-label="Due date (optional)"
+          style={{ flex: "1 1 120px", padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 13, color: due ? C.ink : C.faint, fontFamily: mono }}
         />
         <SmallBtn onClick={add}>Add</SmallBtn>
       </div>
@@ -950,7 +989,12 @@ function Tasks({ tasks, update }) {
   );
 }
 
+const byDue = (a, b) => (a.due || "~").localeCompare(b.due || "~");
+
 function TaskRow({ task, onToggle, onDelete }) {
+  const tk = dateKey();
+  const overdue = task.due && !task.done && task.due < tk;
+  const dueToday = task.due === tk;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 2px", borderBottom: `1px solid ${C.line}` }}>
       <button
@@ -967,6 +1011,14 @@ function TaskRow({ task, onToggle, onDelete }) {
       </button>
       <span style={{ flex: 1, fontSize: 15, color: task.done ? C.faint : C.ink, textDecoration: task.done ? "line-through" : "none" }}>
         {task.title}
+        {task.due && (
+          <span style={{
+            fontFamily: mono, fontSize: 10, letterSpacing: "0.06em", marginLeft: 8,
+            color: task.done ? C.faint : overdue ? C.danger : dueToday ? C.accent : C.faint,
+          }}>
+            {overdue ? "OVERDUE · " : ""}{dueToday ? "TODAY" : fmtShort(task.due)}
+          </span>
+        )}
       </span>
       {onDelete && (
         <button onClick={onDelete} aria-label="Delete task" style={{ background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 14, padding: "2px 4px" }}>
