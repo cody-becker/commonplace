@@ -79,13 +79,22 @@ function SignIn() {
     if (code.trim().length < 6 || busy) return;
     setBusy(true);
     setErr("");
-    const { error } = await supabase.auth.verifyOtp({
+    let { error } = await supabase.auth.verifyOtp({
       email: email.trim(),
       token: code.trim(),
       type: "email",
     });
+    if (error) {
+      // new/unconfirmed accounts get "signup"-type codes instead
+      const retry = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: code.trim(),
+        type: "signup",
+      });
+      error = retry.error;
+    }
     setBusy(false);
-    if (error) setErr("That code didn't work. Check it, or request a fresh one.");
+    if (error) setErr("That code didn't work. Use the newest email — requesting a new code kills old ones.");
     // success: onAuthStateChange flips the app over automatically
   };
 
