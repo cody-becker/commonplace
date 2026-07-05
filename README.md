@@ -4,6 +4,8 @@ A private life ledger — notes, tasks, and goals — that syncs across your pho
 
 Stack: React (Vite) + Supabase (Postgres + auth) + Vercel. All free tier.
 
+Developed using Claude Fable 5 as a pair programmer, deployed and maintained independently. Architecture decisions, deployment, and debugging by me.
+
 ---
 
 ## Setup (~30 minutes, one time)
@@ -17,11 +19,11 @@ Stack: React (Vite) + Supabase (Postgres + auth) + Vercel. All free tier.
 
 That creates one table (`kv`) with row-level security, so only you can read your own rows — even with the public API key.
 
-### 2. Get your API keys
-
-1. In Supabase: **Project Settings → API**
-2. Copy the **Project URL** and the **anon public** key
-3. In this project folder, copy `.env.example` to `.env` and paste both values in
+2. Get your API keys
+In Supabase: Settings → API Keys → if there's no key yet, click Create new API keys
+Copy the Publishable key (sb_publishable_...) — this goes in .env as VITE_SUPABASE_ANON_KEY (legacy variable name, new key works as a drop-in)
+For the Project URL: click Connect at the top of the dashboard, or grab your project ref from the dashboard address bar — it's https://YOUR-REF.supabase.co
+Don't copy anything labeled Secret key or service_role — those bypass your security and never belong in frontend code.
 
 ### 3. Run it locally (optional but recommended)
 
@@ -95,6 +97,7 @@ Row-level security means the anon key in the frontend is safe to expose — Post
 
 ## Troubleshooting
 
+- **Make sure you extracted the zip / you're in the folder containing package.json" and "white screen = .env missing or misnamed; restart the dev server after creating it**
 - **"Missing Supabase config" on load** → your `.env` (local) or Vercel env vars (prod) aren't set
 - **Magic link email never arrives** → check spam; Supabase free tier limits auth emails to ~3–4/hour
 - **Link opens but you're not signed in** → Site URL / Redirect URLs in Supabase don't match where you opened it
