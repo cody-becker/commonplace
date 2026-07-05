@@ -3,7 +3,7 @@ import { loadKey, saveKey } from "./supabase.js";
 
 // ————————————————————————————————————————————
 // COMMONPLACE — a private life ledger
-// Notes · Tasks · Goals, synced through Supabase
+// Today · Journal · Notes · Tasks · Calendar · Goals
 // ————————————————————————————————————————————
 
 const C = {
@@ -35,7 +35,42 @@ const mono = "'IBM Plex Mono', ui-monospace, monospace";
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-const KEYS = { notes: "cp:notes", tasks: "cp:tasks", goals: "cp:goals" };
+const KEYS = {
+  notes: "cp:notes",
+  tasks: "cp:tasks",
+  goals: "cp:goals",
+  events: "cp:events",
+  journal: "cp:journal",
+  links: "cp:links",
+  rituals: "cp:rituals",
+  ritualState: "cp:ritualState",
+};
+
+// local date key, never UTC — a note written at 11pm belongs to today
+const dateKey = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+const parseKey = (k) => {
+  const [y, m, d] = k.split("-").map(Number);
+  return new Date(y, m - 1, d);
+};
+
+const fmtTime = (t) => {
+  if (!t) return "";
+  const [h, m] = t.split(":").map(Number);
+  const ap = h >= 12 ? "PM" : "AM";
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${ap}`;
+};
+
+const fmtShort = (k) =>
+  parseKey(k)
+    .toLocaleDateString("en-US", { weekday: "short", month: "2-digit", day: "2-digit" })
+    .toUpperCase()
+    .replace(",", "")
+    .replace(/\//g, ".");
+
+const fmtLong = (k) =>
+  parseKey(k).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 
 const SEED_GOALS = [
   { id: uid(), title: "Yellowstone road trip — late July", horizon: "now", done: false },
@@ -48,10 +83,15 @@ const SEED_NOTES = [
   {
     id: uid(),
     title: "How this works",
-    body: "Everything here saves to your own database and syncs across devices.\n\nToday is the desk — quick capture drops a note here.\nNotes is the commonplace book — ideas, frameworks, threads worth keeping.\nTasks is the short game. Goals is the long one.\n\nEdit or delete anything, including this.",
+    body: "Everything here saves to your own database and syncs across devices.\n\nToday is the desk — quick capture drops a note here.\nJournal is the record of days. Notes is the commonplace book.\nTasks is the short game. Calendar and Goals are the long one.\n\nEdit or delete anything, including this.",
     created: Date.now(),
     updated: Date.now(),
   },
+];
+
+const SEED_LINKS = [
+  { id: uid(), label: "Gmail", url: "https://mail.google.com" },
+  { id: uid(), label: "D2L", url: "https://ocuonline.okcu.edu" },
 ];
 
 // ————————————————————————————————————————————
@@ -61,28 +101,59 @@ export default function Commonplace({ userId, onSignOut }) {
   const [notes, setNotes] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [goals, setGoals] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [journal, setJournal] = useState([]);
+  const [links, setLinks] = useState([]);
+  const [rituals, setRituals] = useState([]);
+  const [ritualState, setRitualState] = useState({ date: "", done: [] });
   const [loaded, setLoaded] = useState(false);
   const [openNote, setOpenNote] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const [n, t, g] = await Promise.all([
+      const [n, t, g, ev, j, l, r, rs] = await Promise.all([
         loadKey(userId, KEYS.notes, null),
         loadKey(userId, KEYS.tasks, null),
         loadKey(userId, KEYS.goals, null),
+        loadKey(userId, KEYS.events, null),
+        loadKey(userId, KEYS.journal, null),
+        loadKey(userId, KEYS.links, null),
+        loadKey(userId, KEYS.rituals, null),
+        loadKey(userId, KEYS.ritualState, null),
       ]);
       setNotes(n ?? SEED_NOTES);
       setTasks(t ?? []);
       setGoals(g ?? SEED_GOALS);
+      setEvents(ev ?? []);
+      setJournal(j ?? []);
+      setLinks(l ?? SEED_LINKS);
+      setRituals(r ?? []);
+      setRitualState(rs ?? { date: "", done: [] });
       if (n === null) saveKey(userId, KEYS.notes, SEED_NOTES);
       if (g === null) saveKey(userId, KEYS.goals, SEED_GOALS);
+      if (l === null) saveKey(userId, KEYS.links, SEED_LINKS);
       setLoaded(true);
     })();
   }, [userId]);
 
-  const updateNotes = useCallback((next) => { setNotes(next); saveKey(userId, KEYS.notes, next); }, [userId]);
-  const updateTasks = useCallback((next) => { setTasks(next); saveKey(userId, KEYS.tasks, next); }, [userId]);
-  const updateGoals = useCallback((next) => { setGoals(next); saveKey(userId, KEYS.goals, next); }, [userId]);
+  const mk = (setter, key) =>
+    useCallback(
+      (next) => {
+        setter(next);
+        saveKey(userId, key, next);
+      },
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [userId]
+    );
+
+  const updateNotes = mk(setNotes, KEYS.notes);
+  const updateTasks = mk(setTasks, KEYS.tasks);
+  const updateGoals = mk(setGoals, KEYS.goals);
+  const updateEvents = mk(setEvents, KEYS.events);
+  const updateJournal = mk(setJournal, KEYS.journal);
+  const updateLinks = mk(setLinks, KEYS.links);
+  const updateRituals = mk(setRituals, KEYS.rituals);
+  const updateRitualState = mk(setRitualState, KEYS.ritualState);
 
   const now = new Date();
   const dateStamp = now
@@ -94,12 +165,25 @@ export default function Commonplace({ userId, onSignOut }) {
 
   const editing = openNote ? notes.find((n) => n.id === openNote) : null;
 
+  const exportAll = () => {
+    const payload = {
+      exported: new Date().toISOString(),
+      notes, tasks, goals, events, journal, links, rituals,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `commonplace-export-${dateKey()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: C.ground, color: C.ink, fontFamily: sans, fontSize: 15, lineHeight: 1.55 }}>
       <style>{FONT_CSS}</style>
 
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 20px 96px" }}>
-        <header style={{ paddingTop: 28, paddingBottom: 14, borderBottom: `1px solid ${C.line}` }}>
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 20px 40px" }}>
+        <header style={{ paddingTop: "max(28px, env(safe-area-inset-top))", paddingBottom: 14, borderBottom: `1px solid ${C.line}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontFamily: mono, fontSize: 11, letterSpacing: "0.08em", color: C.muted }}>
             <span>{dateStamp}</span>
             <span>
@@ -123,8 +207,10 @@ export default function Commonplace({ userId, onSignOut }) {
           <nav style={{ display: "flex", gap: 4, padding: "14px 0 22px", flexWrap: "wrap" }}>
             {[
               ["today", "TODAY"],
+              ["journal", "JOURNAL"],
               ["notes", "NOTES"],
               ["tasks", "TASKS"],
+              ["calendar", "CALENDAR"],
               ["goals", "GOALS"],
             ].map(([id, label]) => (
               <button
@@ -156,7 +242,10 @@ export default function Commonplace({ userId, onSignOut }) {
           />
         ) : view === "today" ? (
           <Today
-            tasks={tasks} notes={notes} goals={goals}
+            tasks={tasks} notes={notes} goals={goals} events={events}
+            links={links} updateLinks={updateLinks}
+            rituals={rituals} updateRituals={updateRituals}
+            ritualState={ritualState} updateRitualState={updateRitualState}
             onQuickNote={(body) => {
               const n = { id: uid(), title: "", body, created: Date.now(), updated: Date.now() };
               updateNotes([n, ...notes]);
@@ -165,6 +254,8 @@ export default function Commonplace({ userId, onSignOut }) {
             openNote={(id) => setOpenNote(id)}
             goTo={setView}
           />
+        ) : view === "journal" ? (
+          <Journal journal={journal} update={updateJournal} />
         ) : view === "notes" ? (
           <Notes
             notes={notes}
@@ -177,8 +268,22 @@ export default function Commonplace({ userId, onSignOut }) {
           />
         ) : view === "tasks" ? (
           <Tasks tasks={tasks} update={updateTasks} />
+        ) : view === "calendar" ? (
+          <Calendar events={events} update={updateEvents} />
         ) : (
           <Goals goals={goals} update={updateGoals} />
+        )}
+
+        {!editing && loaded && (
+          <footer style={{ marginTop: 48, paddingTop: 16, borderTop: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: "0.1em", color: C.faint }}>A PRIVATE LEDGER</span>
+            <button
+              onClick={exportAll}
+              style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.1em", background: "none", border: "none", color: C.muted, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }}
+            >
+              EXPORT EVERYTHING
+            </button>
+          </footer>
         )}
       </div>
     </div>
@@ -189,12 +294,21 @@ export default function Commonplace({ userId, onSignOut }) {
 // TODAY
 // ————————————————————————————————————————————
 
-function Today({ tasks, notes, goals, onQuickNote, onToggleTask, openNote, goTo }) {
+function Today({
+  tasks, notes, goals, events,
+  links, updateLinks, rituals, updateRituals, ritualState, updateRitualState,
+  onQuickNote, onToggleTask, openNote, goTo,
+}) {
   const [capture, setCapture] = useState("");
   const [captured, setCaptured] = useState(false);
   const open = tasks.filter((t) => !t.done).slice(0, 5);
   const recent = notes.slice(0, 2);
   const nowGoals = goals.filter((g) => g.horizon === "now" && !g.done);
+  const tk = dateKey();
+  const upcoming = events
+    .filter((e) => e.date >= tk)
+    .sort((a, b) => (a.date + (a.time || "99")).localeCompare(b.date + (b.time || "99")))
+    .slice(0, 3);
 
   const submit = () => {
     if (!capture.trim()) return;
@@ -206,7 +320,10 @@ function Today({ tasks, notes, goals, onQuickNote, onToggleTask, openNote, goTo 
 
   return (
     <div>
-      <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+      <QuickLinks links={links} update={updateLinks} />
+
+      {/* quick capture */}
+      <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16, marginTop: 14 }}>
         <Label>QUICK CAPTURE</Label>
         <textarea
           rows={2}
@@ -222,6 +339,23 @@ function Today({ tasks, notes, goals, onQuickNote, onToggleTask, openNote, goTo 
         </div>
       </div>
 
+      <Rituals rituals={rituals} updateRituals={updateRituals} ritualState={ritualState} updateRitualState={updateRitualState} />
+
+      {/* coming up */}
+      {upcoming.length > 0 && (
+        <Section title="COMING UP" action={{ label: "CALENDAR →", fn: () => goTo("calendar") }}>
+          {upcoming.map((e) => (
+            <div key={e.id} style={{ display: "flex", gap: 12, alignItems: "baseline", padding: "10px 2px", borderBottom: `1px solid ${C.line}` }}>
+              <span style={{ fontFamily: mono, fontSize: 10.5, color: e.date === tk ? C.accent : C.faint, whiteSpace: "nowrap" }}>
+                {e.date === tk ? "TODAY" : fmtShort(e.date)}{e.time ? ` · ${fmtTime(e.time)}` : ""}
+              </span>
+              <span style={{ fontSize: 15 }}>{e.title}</span>
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {/* open tasks */}
       <Section title="ON THE DESK" action={open.length === 0 ? null : { label: "ALL TASKS →", fn: () => goTo("tasks") }}>
         {open.length === 0 ? (
           <Empty>Nothing open. Add tasks when the day fills up.</Empty>
@@ -230,6 +364,7 @@ function Today({ tasks, notes, goals, onQuickNote, onToggleTask, openNote, goTo 
         )}
       </Section>
 
+      {/* now goals */}
       {nowGoals.length > 0 && (
         <Section title="IN PLAY" action={{ label: "ALL GOALS →", fn: () => goTo("goals") }}>
           {nowGoals.map((g) => (
@@ -240,6 +375,7 @@ function Today({ tasks, notes, goals, onQuickNote, onToggleTask, openNote, goTo 
         </Section>
       )}
 
+      {/* recent notes */}
       <Section title="RECENTLY WRITTEN" action={{ label: "ALL NOTES →", fn: () => goTo("notes") }}>
         {recent.length === 0 ? (
           <Empty>The book is blank. First entry sets the tone.</Empty>
@@ -250,6 +386,401 @@ function Today({ tasks, notes, goals, onQuickNote, onToggleTask, openNote, goTo 
     </div>
   );
 }
+
+// ————————————————————————————————————————————
+// QUICK LINKS
+// ————————————————————————————————————————————
+
+function QuickLinks({ links, update }) {
+  const [managing, setManaging] = useState(false);
+  const [label, setLabel] = useState("");
+  const [url, setUrl] = useState("");
+
+  const add = () => {
+    if (!label.trim() || !url.trim()) return;
+    const u = url.trim().startsWith("http") ? url.trim() : `https://${url.trim()}`;
+    update([...links, { id: uid(), label: label.trim(), url: u }]);
+    setLabel("");
+    setUrl("");
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        {links.map((l) => (
+          <span key={l.id} style={{ display: "inline-flex", alignItems: "center" }}>
+            <a
+              href={l.url}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                fontFamily: mono, fontSize: 11, letterSpacing: "0.06em",
+                padding: "6px 12px", borderRadius: 999, textDecoration: "none",
+                border: `1px solid ${C.line}`, background: C.surface, color: C.ink,
+              }}
+            >
+              {l.label} ↗
+            </a>
+            {managing && (
+              <button
+                onClick={() => update(links.filter((x) => x.id !== l.id))}
+                aria-label={`Remove ${l.label}`}
+                style={{ background: "none", border: "none", color: C.danger, cursor: "pointer", fontSize: 13, padding: "0 6px 0 2px" }}
+              >
+                ×
+              </button>
+            )}
+          </span>
+        ))}
+        <button
+          onClick={() => setManaging(!managing)}
+          style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.08em", background: "none", border: "none", color: C.faint, cursor: "pointer", padding: "6px 4px" }}
+        >
+          {managing ? "DONE" : links.length === 0 ? "+ ADD LINKS" : "EDIT"}
+        </button>
+      </div>
+      {managing && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          <input
+            value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label"
+            style={{ flex: "1 1 90px", padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 13, color: C.ink }}
+          />
+          <input
+            value={url} onChange={(e) => setUrl(e.target.value)} placeholder="URL"
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            style={{ flex: "2 1 140px", padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 13, color: C.ink }}
+          />
+          <SmallBtn onClick={add}>Add</SmallBtn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ————————————————————————————————————————————
+// RITUALS — daily, resets at midnight
+// ————————————————————————————————————————————
+
+function Rituals({ rituals, updateRituals, ritualState, updateRitualState }) {
+  const [managing, setManaging] = useState(false);
+  const [draft, setDraft] = useState("");
+  const tk = dateKey();
+  const done = ritualState.date === tk ? ritualState.done : [];
+
+  const toggle = (id) => {
+    const next = done.includes(id) ? done.filter((x) => x !== id) : [...done, id];
+    updateRitualState({ date: tk, done: next });
+  };
+
+  const add = () => {
+    if (!draft.trim()) return;
+    updateRituals([...rituals, { id: uid(), title: draft.trim() }]);
+    setDraft("");
+  };
+
+  const count = rituals.filter((r) => done.includes(r.id)).length;
+
+  return (
+    <Section
+      title={rituals.length > 0 ? `RITUALS — ${count}/${rituals.length}` : "RITUALS"}
+      action={{ label: managing ? "DONE" : "EDIT", fn: () => setManaging(!managing) }}
+    >
+      {rituals.length === 0 && !managing ? (
+        <Empty>The small things you do daily. Tap edit to name them.</Empty>
+      ) : (
+        rituals.map((r) => (
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 2px", borderBottom: `1px solid ${C.line}` }}>
+            <button
+              onClick={() => toggle(r.id)}
+              aria-label={done.includes(r.id) ? "Mark not done" : "Mark done"}
+              style={{
+                width: 18, height: 18, borderRadius: "50%", flexShrink: 0, cursor: "pointer",
+                border: `1.5px solid ${done.includes(r.id) ? C.sage : C.faint}`,
+                background: done.includes(r.id) ? C.sage : "transparent",
+                color: C.surface, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              {done.includes(r.id) ? "✓" : ""}
+            </button>
+            <span style={{ flex: 1, fontSize: 15, color: done.includes(r.id) ? C.faint : C.ink }}>{r.title}</span>
+            {managing && (
+              <button
+                onClick={() => updateRituals(rituals.filter((x) => x.id !== r.id))}
+                aria-label="Delete ritual"
+                style={{ background: "none", border: "none", color: C.danger, cursor: "pointer", fontSize: 14, padding: "2px 4px" }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))
+      )}
+      {managing && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            placeholder="Name a daily ritual"
+            style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 14, color: C.ink }}
+          />
+          <SmallBtn onClick={add}>Add</SmallBtn>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+// ————————————————————————————————————————————
+// JOURNAL — one entry per day
+// ————————————————————————————————————————————
+
+function Journal({ journal, update }) {
+  const tk = dateKey();
+  const [sel, setSel] = useState(tk);
+  const entry = journal.find((e) => e.date === sel);
+  const bodyRef = useRef(null);
+
+  useEffect(() => {
+    if (bodyRef.current) {
+      bodyRef.current.style.height = "auto";
+      bodyRef.current.style.height = Math.max(160, bodyRef.current.scrollHeight) + "px";
+    }
+  }, [entry?.body, sel]);
+
+  const setBody = (body) => {
+    if (entry) {
+      update(journal.map((e) => (e.date === sel ? { ...e, body, updated: Date.now() } : e)));
+    } else {
+      update([{ id: uid(), date: sel, body, updated: Date.now() }, ...journal]);
+    }
+  };
+
+  const past = journal
+    .filter((e) => e.date !== sel && e.body.trim())
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  return (
+    <div>
+      <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: "16px 18px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+          <h2 style={{ fontFamily: serif, fontStyle: "italic", fontWeight: 500, fontSize: 22, margin: 0 }}>
+            {sel === tk ? "Today" : fmtLong(sel)}
+          </h2>
+          {sel !== tk && (
+            <button
+              onClick={() => setSel(tk)}
+              style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.1em", background: "none", border: "none", color: C.accent, cursor: "pointer" }}
+            >
+              ← BACK TO TODAY
+            </button>
+          )}
+        </div>
+        <div style={{ fontFamily: mono, fontSize: 10.5, color: C.faint, margin: "2px 0 12px" }}>
+          {sel === tk ? fmtLong(tk).toUpperCase() : "EDITING A PAST DAY"} · SAVED AUTOMATICALLY
+        </div>
+        <textarea
+          ref={bodyRef}
+          value={entry?.body || ""}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="What was today, actually?"
+          style={{ width: "100%", minHeight: 160, border: "none", background: "transparent", fontSize: 15.5, lineHeight: 1.7, color: C.ink, padding: 0 }}
+        />
+      </div>
+
+      {past.length > 0 && (
+        <Section title={`THE RECORD — ${past.length} ${past.length === 1 ? "DAY" : "DAYS"}`}>
+          {past.map((e) => (
+            <button
+              key={e.id}
+              onClick={() => setSel(e.date)}
+              style={{
+                display: "block", width: "100%", textAlign: "left", cursor: "pointer",
+                background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10,
+                padding: "13px 16px", marginBottom: 10, color: C.ink,
+              }}
+            >
+              <div style={{ fontFamily: mono, fontSize: 10.5, color: C.faint, marginBottom: 4 }}>{fmtShort(e.date)}</div>
+              <p style={{ margin: 0, fontSize: 14, color: C.muted, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                {e.body}
+              </p>
+            </button>
+          ))}
+        </Section>
+      )}
+    </div>
+  );
+}
+
+// ————————————————————————————————————————————
+// CALENDAR — month grid + upcoming
+// ————————————————————————————————————————————
+
+function Calendar({ events, update }) {
+  const today = dateKey();
+  const [cursor, setCursor] = useState(() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1);
+  });
+  const [sel, setSel] = useState(today);
+  const [title, setTitle] = useState("");
+  const [time, setTime] = useState("");
+
+  const y = cursor.getFullYear();
+  const m = cursor.getMonth();
+  const firstDow = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const monthLabel = cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  const byDate = {};
+  for (const e of events) byDate[e.date] = (byDate[e.date] || 0) + 1;
+
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const keyFor = (d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  const add = () => {
+    if (!title.trim()) return;
+    update(
+      [...events, { id: uid(), title: title.trim(), date: sel, time: time || null }]
+    );
+    setTitle("");
+    setTime("");
+  };
+
+  const dayEvents = events
+    .filter((e) => e.date === sel)
+    .sort((a, b) => (a.time || "99").localeCompare(b.time || "99"));
+
+  const upcoming = events
+    .filter((e) => e.date >= today)
+    .sort((a, b) => (a.date + (a.time || "99")).localeCompare(b.date + (b.time || "99")))
+    .slice(0, 8);
+
+  const cellSize = "calc((100% - 12px) / 7)";
+
+  return (
+    <div>
+      {/* month header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <button onClick={() => setCursor(new Date(y, m - 1, 1))} aria-label="Previous month" style={navBtn}>‹</button>
+        <h2 style={{ fontFamily: serif, fontStyle: "italic", fontWeight: 500, fontSize: 22, margin: 0 }}>{monthLabel}</h2>
+        <button onClick={() => setCursor(new Date(y, m + 1, 1))} aria-label="Next month" style={navBtn}>›</button>
+      </div>
+
+      {/* grid */}
+      <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 4 }}>
+          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+            <div key={i} style={{ textAlign: "center", fontFamily: mono, fontSize: 10, color: C.faint, letterSpacing: "0.1em", padding: "4px 0" }}>
+              {d}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+          {cells.map((d, i) => {
+            if (d === null) return <div key={`b${i}`} />;
+            const k = keyFor(d);
+            const isSel = k === sel;
+            const isToday = k === today;
+            const has = byDate[k];
+            return (
+              <button
+                key={k}
+                onClick={() => setSel(k)}
+                style={{
+                  aspectRatio: "1", borderRadius: 8, cursor: "pointer",
+                  border: `1px solid ${isSel ? C.accent : isToday ? C.faint : "transparent"}`,
+                  background: isSel ? C.accentSoft : "transparent",
+                  color: isSel ? C.accent : C.ink,
+                  fontSize: 13.5, fontFamily: isToday || isSel ? mono : sans,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
+                  padding: 0,
+                }}
+              >
+                <span>{d}</span>
+                <span style={{ width: 4, height: 4, borderRadius: "50%", background: has ? C.accent : "transparent" }} />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* selected day */}
+      <Section title={sel === today ? "TODAY" : fmtShort(sel)}>
+        {dayEvents.length === 0 ? (
+          <Empty>Nothing planned. Some of the best days aren't.</Empty>
+        ) : (
+          dayEvents.map((e) => (
+            <div key={e.id} style={{ display: "flex", alignItems: "baseline", gap: 12, padding: "10px 2px", borderBottom: `1px solid ${C.line}` }}>
+              <span style={{ fontFamily: mono, fontSize: 10.5, color: C.faint, whiteSpace: "nowrap", minWidth: 62 }}>
+                {e.time ? fmtTime(e.time) : "ALL DAY"}
+              </span>
+              <span style={{ flex: 1, fontSize: 15 }}>{e.title}</span>
+              <button
+                onClick={() => update(events.filter((x) => x.id !== e.id))}
+                aria-label="Delete event"
+                style={{ background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 14, padding: "2px 4px" }}
+              >
+                ×
+              </button>
+            </div>
+          ))
+        )}
+        <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            placeholder={`Add to ${sel === today ? "today" : fmtShort(sel)}`}
+            style={{ flex: "2 1 160px", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 14, color: C.ink }}
+          />
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            aria-label="Time (optional)"
+            style={{ flex: "1 1 90px", padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 13, color: time ? C.ink : C.faint, fontFamily: mono }}
+          />
+          <SmallBtn onClick={add}>Add</SmallBtn>
+        </div>
+      </Section>
+
+      {/* upcoming */}
+      {upcoming.length > 0 && (
+        <Section title="UPCOMING">
+          {upcoming.map((e) => (
+            <button
+              key={e.id}
+              onClick={() => {
+                setSel(e.date);
+                const d = parseKey(e.date);
+                setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
+              }}
+              style={{
+                display: "flex", width: "100%", gap: 12, alignItems: "baseline", textAlign: "left",
+                padding: "10px 2px", borderBottom: `1px solid ${C.line}`,
+                background: "none", border: "none", borderBottomStyle: "solid", cursor: "pointer", color: C.ink,
+              }}
+            >
+              <span style={{ fontFamily: mono, fontSize: 10.5, color: e.date === today ? C.accent : C.faint, whiteSpace: "nowrap" }}>
+                {e.date === today ? "TODAY" : fmtShort(e.date)}{e.time ? ` · ${fmtTime(e.time)}` : ""}
+              </span>
+              <span style={{ fontSize: 15 }}>{e.title}</span>
+            </button>
+          ))}
+        </Section>
+      )}
+    </div>
+  );
+}
+
+const navBtn = {
+  fontFamily: mono, fontSize: 18, width: 36, height: 36, borderRadius: 999,
+  border: `1px solid ${C.line}`, background: C.surface, color: C.ink, cursor: "pointer",
+};
 
 // ————————————————————————————————————————————
 // NOTES
