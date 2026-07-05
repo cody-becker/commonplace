@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabase.js";
 import Commonplace from "./Commonplace.jsx";
 
@@ -11,6 +11,7 @@ const C = {
   line: "#DEDCD2",
   accent: "#34509B",
   sage: "#7C8471",
+  danger: "#9B4A3A",
 };
 const serif = "'Newsreader', Georgia, serif";
 const sans = "'IBM Plex Sans', system-ui, sans-serif";
@@ -51,9 +52,15 @@ export default function App() {
 
 function SignIn() {
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [phase, setPhase] = useState("email"); // "email" | "code"
+  const [code, setCode] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const codeRef = useRef(null);
+
+  useEffect(() => {
+    if (phase === "code" && codeRef.current) codeRef.current.focus();
+  }, [phase]);
 
   const send = async () => {
     if (!email.trim() || busy) return;
@@ -65,7 +72,21 @@ function SignIn() {
     });
     setBusy(false);
     if (error) setErr(error.message);
-    else setSent(true);
+    else setPhase("code");
+  };
+
+  const verify = async () => {
+    if (code.trim().length < 6 || busy) return;
+    setBusy(true);
+    setErr("");
+    const { error } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: code.trim(),
+      type: "email",
+    });
+    setBusy(false);
+    if (error) setErr("That code didn't work. Check it, or request a fresh one.");
+    // success: onAuthStateChange flips the app over automatically
   };
 
   return (
@@ -77,14 +98,7 @@ function SignIn() {
         Commonplace
       </h1>
 
-      {sent ? (
-        <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 18 }}>
-          <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: "0.1em", color: C.sage }}>LINK SENT</div>
-          <p style={{ margin: "8px 0 0", fontSize: 15, color: C.ink }}>
-            Check <strong>{email}</strong> for a sign-in link. Open it on this device and you're in.
-          </p>
-        </div>
-      ) : (
+      {phase === "email" ? (
         <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 18 }}>
           <label htmlFor="email" style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.12em", color: C.muted }}>
             EMAIL
@@ -97,35 +111,91 @@ function SignIn() {
             onKeyDown={(e) => e.key === "Enter" && send()}
             placeholder="you@example.com"
             autoComplete="email"
-            style={{
-              display: "block", width: "100%", marginTop: 8, padding: "10px 12px",
-              borderRadius: 8, border: `1px solid ${C.line}`, background: C.ground,
-              fontSize: 15, color: C.ink, boxSizing: "border-box",
-            }}
+            style={inputStyle}
           />
-          <button
-            onClick={send}
-            disabled={busy}
-            style={{
-              marginTop: 12, fontFamily: mono, fontSize: 11, letterSpacing: "0.08em",
-              padding: "10px 18px", borderRadius: 999, cursor: "pointer",
-              border: `1px solid ${C.accent}`, background: C.accent, color: C.surface,
-              opacity: busy ? 0.6 : 1,
-            }}
-          >
-            {busy ? "SENDING…" : "Send sign-in link"}
+          <button onClick={send} disabled={busy} style={btnStyle(busy)}>
+            {busy ? "SENDING…" : "Send me a code"}
           </button>
-          {err && (
-            <p style={{ marginTop: 10, fontSize: 13, color: "#9B4A3A" }}>{err}</p>
-          )}
+          {err && <p style={{ marginTop: 10, fontSize: 13, color: C.danger }}>{err}</p>}
           <p style={{ marginTop: 14, fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>
-            No password. A one-time link lands in your inbox; the same email works on every device.
+            No password. A 6-digit code lands in your inbox — type it here and you're in.
           </p>
+        </div>
+      ) : (
+        <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 18 }}>
+          <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: "0.1em", color: C.sage }}>CODE SENT</div>
+          <p style={{ margin: "8px 0 12px", fontSize: 14.5, color: C.ink }}>
+            Check <strong>{email}</strong> for a 6-digit code and enter it below.
+          </p>
+          <label htmlFor="code" style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.12em", color: C.muted }}>
+            CODE
+          </label>
+          <input
+            id="code"
+            ref={codeRef}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            onKeyDown={(e) => e.key === "Enter" && verify()}
+            placeholder="000000"
+            style={{ ...inputStyle, fontFamily: mono, fontSize: 22, letterSpacing: "0.35em", textAlign: "center" }}
+          />
+          <button onClick={verify} disabled={busy || code.length < 6} style={btnStyle(busy || code.length < 6)}>
+            {busy ? "CHECKING…" : "Sign in"}
+          </button>
+          {err && <p style={{ marginTop: 10, fontSize: 13, color: C.danger }}>{err}</p>}
+          <div style={{ display: "flex", gap: 16, marginTop: 14 }}>
+            <button onClick={send} disabled={busy} style={linkBtn}>
+              RESEND CODE
+            </button>
+            <button onClick={() => { setPhase("email"); setCode(""); setErr(""); }} style={linkBtn}>
+              DIFFERENT EMAIL
+            </button>
+          </div>
         </div>
       )}
     </Shell>
   );
 }
+
+const inputStyle = {
+  display: "block",
+  width: "100%",
+  marginTop: 8,
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: `1px solid ${C.line}`,
+  background: C.ground,
+  fontSize: 15,
+  color: C.ink,
+  boxSizing: "border-box",
+};
+
+const btnStyle = (disabled) => ({
+  marginTop: 12,
+  fontFamily: mono,
+  fontSize: 11,
+  letterSpacing: "0.08em",
+  padding: "10px 18px",
+  borderRadius: 999,
+  cursor: disabled ? "default" : "pointer",
+  border: `1px solid ${C.accent}`,
+  background: C.accent,
+  color: C.surface,
+  opacity: disabled ? 0.55 : 1,
+});
+
+const linkBtn = {
+  fontFamily: mono,
+  fontSize: 10.5,
+  letterSpacing: "0.1em",
+  background: "none",
+  border: "none",
+  color: C.muted,
+  cursor: "pointer",
+  padding: 0,
+};
 
 function Shell({ children }) {
   return (
