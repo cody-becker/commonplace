@@ -27,28 +27,6 @@ input, textarea, button, select { font-family: inherit; }
 input:focus-visible, textarea:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid ${C.accent}; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 textarea { resize: none; }
-
-.punch-holes { display: none; }
-@media (min-width: 900px) {
-  .punch-holes {
-    display: block;
-    position: fixed;
-    top: 0; bottom: 0;
-    left: max(20px, calc(50% - 404px));
-    width: 16px;
-    pointer-events: none;
-  }
-  .punch-hole {
-    position: absolute;
-    left: 0;
-    width: 15px;
-    height: 15px;
-    border-radius: 50%;
-    background: ${C.ground};
-    box-shadow: inset 0 1px 3px rgba(34,36,44,0.28), inset 0 -1px 1px rgba(255,255,255,0.5);
-    border: 1px solid rgba(34,36,44,0.10);
-  }
-}
 `;
 
 const serif = "'Newsreader', Georgia, serif";
@@ -216,16 +194,11 @@ export default function Commonplace({ userId, onSignOut }) {
       style={{
         minHeight: "100vh",
         background: C.ground,
-        backgroundImage: `repeating-linear-gradient(to bottom, transparent, transparent 27px, rgba(34,36,44,0.07) 27px, rgba(34,36,44,0.07) 28px)`,
+        backgroundImage: `repeating-linear-gradient(to bottom, transparent, transparent 27px, rgba(34,36,44,0.10) 27px, rgba(34,36,44,0.10) 28px)`,
         color: C.ink, fontFamily: sans, fontSize: 15, lineHeight: 1.55,
       }}
     >
       <style>{FONT_CSS}</style>
-      <div className="punch-holes">
-        <div className="punch-hole" style={{ top: "16%" }} />
-        <div className="punch-hole" style={{ top: "50%" }} />
-        <div className="punch-hole" style={{ top: "84%" }} />
-      </div>
 
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 20px 40px" }}>
         <header style={{ paddingTop: "max(28px, env(safe-area-inset-top))", paddingBottom: 14, borderBottom: `1px solid ${C.line}` }}>
