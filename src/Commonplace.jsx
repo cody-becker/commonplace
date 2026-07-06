@@ -44,6 +44,7 @@ const KEYS = {
   links: "cp:links",
   rituals: "cp:rituals",
   ritualState: "cp:ritualState",
+  dayStart: "cp:dayStart",
 };
 
 // local date key, never UTC — a note written at 11pm belongs to today
@@ -106,12 +107,14 @@ export default function Commonplace({ userId, onSignOut }) {
   const [links, setLinks] = useState([]);
   const [rituals, setRituals] = useState([]);
   const [ritualState, setRitualState] = useState({ date: "", done: [] });
+  const [dayStart, setDayStart] = useState({ date: "", at: null });
+  const [calendarFocus, setCalendarFocus] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [openNote, setOpenNote] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const [n, t, g, ev, j, l, r, rs] = await Promise.all([
+      const [n, t, g, ev, j, l, r, rs, ds] = await Promise.all([
         loadKey(userId, KEYS.notes, null),
         loadKey(userId, KEYS.tasks, null),
         loadKey(userId, KEYS.goals, null),
@@ -120,6 +123,7 @@ export default function Commonplace({ userId, onSignOut }) {
         loadKey(userId, KEYS.links, null),
         loadKey(userId, KEYS.rituals, null),
         loadKey(userId, KEYS.ritualState, null),
+        loadKey(userId, KEYS.dayStart, null),
       ]);
       setNotes(n ?? SEED_NOTES);
       setTasks(t ?? []);
@@ -129,6 +133,7 @@ export default function Commonplace({ userId, onSignOut }) {
       setLinks(l ?? SEED_LINKS);
       setRituals(r ?? []);
       setRitualState(rs ?? { date: "", done: [] });
+      setDayStart(ds ?? { date: "", at: null });
       if (n === null) saveKey(userId, KEYS.notes, SEED_NOTES);
       if (g === null) saveKey(userId, KEYS.goals, SEED_GOALS);
       if (l === null) saveKey(userId, KEYS.links, SEED_LINKS);
@@ -154,6 +159,12 @@ export default function Commonplace({ userId, onSignOut }) {
   const updateLinks = mk(setLinks, KEYS.links);
   const updateRituals = mk(setRituals, KEYS.rituals);
   const updateRitualState = mk(setRitualState, KEYS.ritualState);
+  const updateDayStart = mk(setDayStart, KEYS.dayStart);
+
+  const goToDate = (dstr) => {
+    setCalendarFocus(dstr);
+    setView("calendar");
+  };
 
   const now = new Date();
   const dateStamp = now
@@ -168,7 +179,7 @@ export default function Commonplace({ userId, onSignOut }) {
   const exportAll = () => {
     const payload = {
       exported: new Date().toISOString(),
-      notes, tasks, goals, events, journal, links, rituals,
+      notes, tasks, goals, events, journal, links, rituals, dayStart,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -215,7 +226,7 @@ export default function Commonplace({ userId, onSignOut }) {
             ].map(([id, label]) => (
               <button
                 key={id}
-                onClick={() => setView(id)}
+                onClick={() => { setView(id); if (id === "calendar") setCalendarFocus(null); }}
                 style={{
                   fontFamily: mono, fontSize: 11, letterSpacing: "0.1em",
                   padding: "7px 13px", borderRadius: 999, cursor: "pointer",
@@ -246,6 +257,7 @@ export default function Commonplace({ userId, onSignOut }) {
             links={links} updateLinks={updateLinks}
             rituals={rituals} updateRituals={updateRituals}
             ritualState={ritualState} updateRitualState={updateRitualState}
+            dayStart={dayStart} updateDayStart={updateDayStart}
             onQuickNote={(body) => {
               const n = { id: uid(), title: "", body, created: Date.now(), updated: Date.now() };
               updateNotes([n, ...notes]);
@@ -253,6 +265,7 @@ export default function Commonplace({ userId, onSignOut }) {
             onToggleTask={(id) => updateTasks(tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)))}
             openNote={(id) => setOpenNote(id)}
             goTo={setView}
+            goToDate={goToDate}
           />
         ) : view === "journal" ? (
           <Journal journal={journal} update={updateJournal} />
@@ -269,7 +282,7 @@ export default function Commonplace({ userId, onSignOut }) {
         ) : view === "tasks" ? (
           <Tasks tasks={tasks} update={updateTasks} />
         ) : view === "calendar" ? (
-          <Calendar events={events} update={updateEvents} tasks={tasks} updateTasks={updateTasks} />
+          <Calendar events={events} update={updateEvents} tasks={tasks} updateTasks={updateTasks} focusDate={calendarFocus} />
         ) : (
           <Goals goals={goals} update={updateGoals} />
         )}
@@ -297,18 +310,15 @@ export default function Commonplace({ userId, onSignOut }) {
 function Today({
   tasks, notes, goals, events,
   links, updateLinks, rituals, updateRituals, ritualState, updateRitualState,
-  onQuickNote, onToggleTask, openNote, goTo,
+  dayStart, updateDayStart,
+  onQuickNote, onToggleTask, openNote, goTo, goToDate,
 }) {
   const [capture, setCapture] = useState("");
   const [captured, setCaptured] = useState(false);
-  const open = tasks.filter((t) => !t.done).sort(byDue).slice(0, 5);
+  const tk = dateKey();
+  const open = tasks.filter((t) => !t.done && t.due !== tk).sort(byDue).slice(0, 5);
   const recent = notes.slice(0, 2);
   const nowGoals = goals.filter((g) => g.horizon === "now" && !g.done);
-  const tk = dateKey();
-  const upcoming = events
-    .filter((e) => e.date >= tk)
-    .sort((a, b) => (a.date + (a.time || "99")).localeCompare(b.date + (b.time || "99")))
-    .slice(0, 3);
 
   const submit = () => {
     if (!capture.trim()) return;
@@ -320,10 +330,17 @@ function Today({
 
   return (
     <div>
-      <QuickLinks links={links} update={updateLinks} />
+      <StartHere
+        tasks={tasks} events={events} onToggleTask={onToggleTask}
+        links={links} updateLinks={updateLinks}
+        rituals={rituals} updateRituals={updateRituals}
+        ritualState={ritualState} updateRitualState={updateRitualState}
+        dayStart={dayStart} updateDayStart={updateDayStart}
+        goToDate={goToDate}
+      />
 
       {/* quick capture */}
-      <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16, marginTop: 14 }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
         <Label>QUICK CAPTURE</Label>
         <textarea
           rows={2}
@@ -339,23 +356,7 @@ function Today({
         </div>
       </div>
 
-      <Rituals rituals={rituals} updateRituals={updateRituals} ritualState={ritualState} updateRitualState={updateRitualState} />
-
-      {/* coming up */}
-      {upcoming.length > 0 && (
-        <Section title="COMING UP" action={{ label: "CALENDAR →", fn: () => goTo("calendar") }}>
-          {upcoming.map((e) => (
-            <div key={e.id} style={{ display: "flex", gap: 12, alignItems: "baseline", padding: "10px 2px", borderBottom: `1px solid ${C.line}` }}>
-              <span style={{ fontFamily: mono, fontSize: 10.5, color: e.date === tk ? C.accent : C.faint, whiteSpace: "nowrap" }}>
-                {e.date === tk ? "TODAY" : fmtShort(e.date)}{e.time ? ` · ${fmtTime(e.time)}` : ""}
-              </span>
-              <span style={{ fontSize: 15 }}>{e.title}</span>
-            </div>
-          ))}
-        </Section>
-      )}
-
-      {/* open tasks */}
+      {/* open tasks (today's due items already live in Start Here) */}
       <Section title="ON THE DESK" action={open.length === 0 ? null : { label: "ALL TASKS →", fn: () => goTo("tasks") }}>
         {open.length === 0 ? (
           <Empty>Nothing open. Add tasks when the day fills up.</Empty>
@@ -384,6 +385,146 @@ function Today({
         )}
       </Section>
     </div>
+  );
+}
+
+// ————————————————————————————————————————————
+// START HERE — greeting, week strip, the begin-the-day ritual
+// ————————————————————————————————————————————
+
+function StartHere({
+  tasks, events, onToggleTask,
+  links, updateLinks, rituals, updateRituals, ritualState, updateRitualState,
+  dayStart, updateDayStart, goToDate,
+}) {
+  const tk = dateKey();
+  const started = dayStart.date === tk;
+  const hour = new Date().getHours();
+  const greeting = hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  // week strip, Sunday through Saturday, matching the month calendar's convention
+  const now = new Date();
+  const sunday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+  const week = Array.from({ length: 7 }, (_, i) => dateKey(new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate() + i)));
+
+  const hasItems = {};
+  for (const e of events) hasItems[e.date] = true;
+  for (const t of tasks) if (t.due && !t.done) hasItems[t.due] = true;
+
+  const eventsToday = events.filter((e) => e.date === tk).sort((a, b) => (a.time || "99").localeCompare(b.time || "99"));
+  const dueToday = tasks.filter((t) => t.due === tk);
+
+  const begin = () => updateDayStart({ date: tk, at: Date.now() });
+
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.accentSoft}`, borderRadius: 10, padding: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <h2 style={{ fontFamily: serif, fontStyle: "italic", fontWeight: 500, fontSize: 23, margin: 0 }}>
+          {greeting}.
+        </h2>
+        {started && (
+          <span style={{ fontFamily: mono, fontSize: 10, color: C.faint, letterSpacing: "0.08em" }}>
+            STARTED {new Date(dayStart.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toUpperCase()}
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 4, marginTop: 14 }}>
+        {week.map((k) => {
+          const d = parseKey(k);
+          const isToday = k === tk;
+          return (
+            <button
+              key={k}
+              onClick={() => goToDate(k)}
+              style={{
+                flex: 1, padding: "8px 2px", borderRadius: 8, cursor: "pointer",
+                border: `1px solid ${isToday ? C.accent : C.line}`,
+                background: isToday ? C.accentSoft : "transparent",
+                color: isToday ? C.accent : C.ink,
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+              }}
+            >
+              <span style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.05em", color: isToday ? C.accent : C.faint }}>
+                {d.toLocaleDateString("en-US", { weekday: "narrow" })}
+              </span>
+              <span style={{ fontSize: 13.5, fontFamily: isToday ? mono : sans }}>{d.getDate()}</span>
+              <span style={{ width: 4, height: 4, borderRadius: "50%", background: hasItems[k] ? (isToday ? C.accent : C.faint) : "transparent" }} />
+            </button>
+          );
+        })}
+      </div>
+
+      {!started ? (
+        <button
+          onClick={begin}
+          style={{
+            marginTop: 16, width: "100%", fontFamily: mono, fontSize: 12, letterSpacing: "0.12em",
+            padding: "13px 16px", borderRadius: 8, cursor: "pointer",
+            border: `1px solid ${C.accent}`, background: C.accent, color: C.surface,
+          }}
+        >
+          BEGIN THE DAY
+        </button>
+      ) : (
+        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 16 }}>
+          {eventsToday.length > 0 && (
+            <div>
+              <MiniLabel>TODAY'S EVENTS</MiniLabel>
+              {eventsToday.map((e) => (
+                <div key={e.id} style={{ display: "flex", gap: 10, padding: "7px 0", fontSize: 14.5 }}>
+                  <span style={{ fontFamily: mono, fontSize: 10.5, color: C.faint, minWidth: 64 }}>
+                    {e.time ? fmtTime(e.time) : "ALL DAY"}
+                  </span>
+                  <span>{e.title}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {dueToday.length > 0 && (
+            <div>
+              <MiniLabel>DUE TODAY</MiniLabel>
+              {dueToday.map((t) => (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0" }}>
+                  <button
+                    onClick={() => onToggleTask(t.id)}
+                    aria-label={t.done ? "Mark not done" : "Mark done"}
+                    style={{
+                      width: 17, height: 17, borderRadius: 5, flexShrink: 0, cursor: "pointer",
+                      border: `1.5px solid ${t.done ? C.sage : C.faint}`,
+                      background: t.done ? C.sage : "transparent",
+                      color: C.surface, fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center",
+                    }}
+                  >
+                    {t.done ? "✓" : ""}
+                  </button>
+                  <span style={{ fontSize: 14.5, color: t.done ? C.faint : C.ink, textDecoration: t.done ? "line-through" : "none" }}>
+                    {t.title}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div>
+            <MiniLabel>RITUALS</MiniLabel>
+            <RitualList rituals={rituals} updateRituals={updateRituals} ritualState={ritualState} updateRitualState={updateRitualState} />
+          </div>
+
+          <div>
+            <MiniLabel>LINKS</MiniLabel>
+            <QuickLinks links={links} update={updateLinks} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniLabel({ children }) {
+  return (
+    <div style={{ fontFamily: mono, fontSize: 10, letterSpacing: "0.1em", color: C.muted, marginBottom: 4 }}>{children}</div>
   );
 }
 
@@ -461,7 +602,7 @@ function QuickLinks({ links, update }) {
 // RITUALS — daily, resets at midnight
 // ————————————————————————————————————————————
 
-function Rituals({ rituals, updateRituals, ritualState, updateRitualState }) {
+function RitualList({ rituals, updateRituals, ritualState, updateRitualState }) {
   const [managing, setManaging] = useState(false);
   const [draft, setDraft] = useState("");
   const tk = dateKey();
@@ -478,31 +619,26 @@ function Rituals({ rituals, updateRituals, ritualState, updateRitualState }) {
     setDraft("");
   };
 
-  const count = rituals.filter((r) => done.includes(r.id)).length;
-
   return (
-    <Section
-      title={rituals.length > 0 ? `RITUALS — ${count}/${rituals.length}` : "RITUALS"}
-      action={{ label: managing ? "DONE" : "EDIT", fn: () => setManaging(!managing) }}
-    >
+    <div>
       {rituals.length === 0 && !managing ? (
         <Empty>The small things you do daily. Tap edit to name them.</Empty>
       ) : (
         rituals.map((r) => (
-          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 2px", borderBottom: `1px solid ${C.line}` }}>
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "7px 0" }}>
             <button
               onClick={() => toggle(r.id)}
               aria-label={done.includes(r.id) ? "Mark not done" : "Mark done"}
               style={{
-                width: 18, height: 18, borderRadius: "50%", flexShrink: 0, cursor: "pointer",
+                width: 17, height: 17, borderRadius: "50%", flexShrink: 0, cursor: "pointer",
                 border: `1.5px solid ${done.includes(r.id) ? C.sage : C.faint}`,
                 background: done.includes(r.id) ? C.sage : "transparent",
-                color: C.surface, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center",
+                color: C.surface, fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center",
               }}
             >
               {done.includes(r.id) ? "✓" : ""}
             </button>
-            <span style={{ flex: 1, fontSize: 15, color: done.includes(r.id) ? C.faint : C.ink }}>{r.title}</span>
+            <span style={{ flex: 1, fontSize: 14.5, color: done.includes(r.id) ? C.faint : C.ink }}>{r.title}</span>
             {managing && (
               <button
                 onClick={() => updateRituals(rituals.filter((x) => x.id !== r.id))}
@@ -516,18 +652,24 @@ function Rituals({ rituals, updateRituals, ritualState, updateRitualState }) {
         ))
       )}
       {managing && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && add()}
             placeholder="Name a daily ritual"
-            style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 14, color: C.ink }}
+            style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.ground, fontSize: 13, color: C.ink }}
           />
           <SmallBtn onClick={add}>Add</SmallBtn>
         </div>
       )}
-    </Section>
+      <button
+        onClick={() => setManaging(!managing)}
+        style={{ fontFamily: mono, fontSize: 10, letterSpacing: "0.08em", background: "none", border: "none", color: C.faint, cursor: "pointer", padding: "6px 0 0" }}
+      >
+        {managing ? "DONE" : "EDIT"}
+      </button>
+    </div>
   );
 }
 
@@ -616,13 +758,13 @@ function Journal({ journal, update }) {
 // CALENDAR — month grid + upcoming
 // ————————————————————————————————————————————
 
-function Calendar({ events, update, tasks, updateTasks }) {
+function Calendar({ events, update, tasks, updateTasks, focusDate }) {
   const today = dateKey();
   const [cursor, setCursor] = useState(() => {
-    const n = new Date();
-    return new Date(n.getFullYear(), n.getMonth(), 1);
+    const base = focusDate ? parseKey(focusDate) : new Date();
+    return new Date(base.getFullYear(), base.getMonth(), 1);
   });
-  const [sel, setSel] = useState(today);
+  const [sel, setSel] = useState(focusDate || today);
   const [title, setTitle] = useState("");
   const [time, setTime] = useState("");
 
