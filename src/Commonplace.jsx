@@ -193,14 +193,24 @@ export default function Commonplace({ userId, onSignOut }) {
     <div
       style={{
         minHeight: "100vh",
-        background: C.ground,
-        backgroundImage: `repeating-linear-gradient(to bottom, transparent, transparent 27px, rgba(34,36,44,0.10) 27px, rgba(34,36,44,0.10) 28px)`,
+        background: "#1B1720",
         color: C.ink, fontFamily: sans, fontSize: 15, lineHeight: 1.55,
+        padding: "clamp(0px, 3vw, 32px) 14px",
       }}
     >
       <style>{FONT_CSS}</style>
 
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 20px 40px" }}>
+      <div
+        style={{
+          maxWidth: 720, margin: "0 auto", position: "relative", overflow: "hidden",
+          background: C.ground,
+          backgroundImage: `repeating-linear-gradient(to bottom, transparent, transparent 27px, rgba(34,36,44,0.10) 27px, rgba(34,36,44,0.10) 28px)`,
+          borderRadius: 14,
+          boxShadow: "0 22px 50px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.25)",
+          padding: "0 20px 40px",
+        }}
+      >
+        <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: 6, background: C.accent }} />
         <header style={{ paddingTop: "max(28px, env(safe-area-inset-top))", paddingBottom: 14, borderBottom: `1px solid ${C.line}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontFamily: mono, fontSize: 11, letterSpacing: "0.08em", color: C.muted }}>
             <span>{dateStamp}</span>
