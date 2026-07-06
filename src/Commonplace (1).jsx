@@ -402,6 +402,9 @@ function StartHere({
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
+  const [drafting, setDrafting] = useState(false);
+  const [intentionDraft, setIntentionDraft] = useState("");
+
   // week strip, Sunday through Saturday, matching the month calendar's convention
   const now = new Date();
   const sunday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
@@ -414,7 +417,20 @@ function StartHere({
   const eventsToday = events.filter((e) => e.date === tk).sort((a, b) => (a.time || "99").localeCompare(b.time || "99"));
   const dueToday = tasks.filter((t) => t.due === tk);
 
-  const begin = () => updateDayStart({ date: tk, at: Date.now() });
+  const finalize = (text) => {
+    updateDayStart({
+      date: tk,
+      at: started ? dayStart.at : Date.now(),
+      intention: text.trim(),
+    });
+    setDrafting(false);
+    setIntentionDraft("");
+  };
+
+  const openEditor = () => {
+    setIntentionDraft(started ? dayStart.intention || "" : "");
+    setDrafting(true);
+  };
 
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.accentSoft}`, borderRadius: 10, padding: 18 }}>
@@ -455,9 +471,10 @@ function StartHere({
         })}
       </div>
 
-      {!started ? (
+      {/* the threshold: not started, and not yet drafting an intention */}
+      {!started && !drafting && (
         <button
-          onClick={begin}
+          onClick={() => setDrafting(true)}
           style={{
             marginTop: 16, width: "100%", fontFamily: mono, fontSize: 12, letterSpacing: "0.12em",
             padding: "13px 16px", borderRadius: 8, cursor: "pointer",
@@ -466,8 +483,61 @@ function StartHere({
         >
           BEGIN THE DAY
         </button>
-      ) : (
+      )}
+
+      {/* setting or editing the intention */}
+      {drafting && (
+        <div style={{ marginTop: 16 }}>
+          <MiniLabel>WHAT WILL TODAY BE?</MiniLabel>
+          <input
+            autoFocus
+            value={intentionDraft}
+            onChange={(e) => setIntentionDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && finalize(intentionDraft)}
+            placeholder="One word, one line, or leave it blank"
+            style={{
+              width: "100%", padding: "10px 12px", borderRadius: 8, border: `1px solid ${C.line}`,
+              background: C.ground, fontSize: 15, fontFamily: serif, fontStyle: "italic", color: C.ink,
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 14, marginTop: 10 }}>
+            <button
+              onClick={() => { setDrafting(false); setIntentionDraft(""); }}
+              style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.1em", background: "none", border: "none", color: C.faint, cursor: "pointer" }}
+            >
+              CANCEL
+            </button>
+            <SmallBtn onClick={() => finalize(intentionDraft)}>
+              {started ? "Save" : intentionDraft.trim() ? "Begin" : "Skip & begin"}
+            </SmallBtn>
+          </div>
+        </div>
+      )}
+
+      {/* settled: the day has begun */}
+      {started && !drafting && (
         <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 16 }}>
+          {dayStart.intention ? (
+            <button
+              onClick={openEditor}
+              style={{
+                textAlign: "left", background: "transparent", border: "none", cursor: "pointer",
+                borderLeft: `2px solid ${C.accent}`, padding: "2px 0 2px 12px",
+              }}
+            >
+              <p style={{ margin: 0, fontFamily: serif, fontStyle: "italic", fontSize: 16.5, color: C.ink }}>
+                “{dayStart.intention}”
+              </p>
+            </button>
+          ) : (
+            <button
+              onClick={openEditor}
+              style={{ alignSelf: "flex-start", fontFamily: mono, fontSize: 10.5, letterSpacing: "0.08em", background: "none", border: "none", color: C.faint, cursor: "pointer" }}
+            >
+              + SET AN INTENTION FOR TODAY
+            </button>
+          )}
+
           {eventsToday.length > 0 && (
             <div>
               <MiniLabel>TODAY'S EVENTS</MiniLabel>
