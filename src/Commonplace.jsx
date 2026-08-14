@@ -45,7 +45,13 @@ const KEYS = {
   rituals: "cp:rituals",
   ritualState: "cp:ritualState",
   dayStart: "cp:dayStart",
+  classes: "cp:classes",
 };
+
+// muted, plum-family-adjacent palette — cycles per class so each gets a
+// distinct but tasteful tag color without the user having to pick one
+const CLASS_COLORS = ["#5B3F6B", "#7C8471", "#9B6A4A", "#4A6B7C", "#8A5A6B", "#6B7C4A"];
+const classColor = (i) => CLASS_COLORS[i % CLASS_COLORS.length];
 
 // local date key, never UTC — a note written at 11pm belongs to today
 const dateKey = (d = new Date()) =>
@@ -108,13 +114,14 @@ export default function Commonplace({ userId, onSignOut }) {
   const [rituals, setRituals] = useState([]);
   const [ritualState, setRitualState] = useState({ date: "", done: [] });
   const [dayStart, setDayStart] = useState({ date: "", at: null });
+  const [classes, setClasses] = useState([]);
   const [calendarFocus, setCalendarFocus] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [openNote, setOpenNote] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const [n, t, g, ev, j, l, r, rs, ds] = await Promise.all([
+      const [n, t, g, ev, j, l, r, rs, ds, cl] = await Promise.all([
         loadKey(userId, KEYS.notes, null),
         loadKey(userId, KEYS.tasks, null),
         loadKey(userId, KEYS.goals, null),
@@ -124,6 +131,7 @@ export default function Commonplace({ userId, onSignOut }) {
         loadKey(userId, KEYS.rituals, null),
         loadKey(userId, KEYS.ritualState, null),
         loadKey(userId, KEYS.dayStart, null),
+        loadKey(userId, KEYS.classes, null),
       ]);
       setNotes(n ?? SEED_NOTES);
       setTasks(t ?? []);
@@ -134,6 +142,7 @@ export default function Commonplace({ userId, onSignOut }) {
       setRituals(r ?? []);
       setRitualState(rs ?? { date: "", done: [] });
       setDayStart(ds ?? { date: "", at: null });
+      setClasses(cl ?? []);
       if (n === null) saveKey(userId, KEYS.notes, SEED_NOTES);
       if (g === null) saveKey(userId, KEYS.goals, SEED_GOALS);
       if (l === null) saveKey(userId, KEYS.links, SEED_LINKS);
@@ -160,6 +169,7 @@ export default function Commonplace({ userId, onSignOut }) {
   const updateRituals = mk(setRituals, KEYS.rituals);
   const updateRitualState = mk(setRitualState, KEYS.ritualState);
   const updateDayStart = mk(setDayStart, KEYS.dayStart);
+  const updateClasses = mk(setClasses, KEYS.classes);
 
   const goToDate = (dstr) => {
     setCalendarFocus(dstr);
@@ -179,7 +189,7 @@ export default function Commonplace({ userId, onSignOut }) {
   const exportAll = () => {
     const payload = {
       exported: new Date().toISOString(),
-      notes, tasks, goals, events, journal, links, rituals, dayStart,
+      notes, tasks, goals, events, journal, links, rituals, dayStart, classes,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -228,6 +238,7 @@ export default function Commonplace({ userId, onSignOut }) {
               ["journal", "JOURNAL"],
               ["notes", "NOTES"],
               ["tasks", "TASKS"],
+              ["classes", "CLASSES"],
               ["calendar", "CALENDAR"],
               ["goals", "GOALS"],
             ].map(([id, label]) => (
@@ -288,6 +299,8 @@ export default function Commonplace({ userId, onSignOut }) {
           />
         ) : view === "tasks" ? (
           <Tasks tasks={tasks} update={updateTasks} />
+        ) : view === "classes" ? (
+          <Classes classes={classes} update={updateClasses} />
         ) : view === "calendar" ? (
           <Calendar events={events} update={updateEvents} tasks={tasks} updateTasks={updateTasks} focusDate={calendarFocus} />
         ) : (
@@ -1344,6 +1357,189 @@ function Goals({ goals, update }) {
           </Section>
         );
       })}
+    </div>
+  );
+}
+
+// ————————————————————————————————————————————
+// CLASSES
+// ————————————————————————————————————————————
+
+function Classes({ classes, update }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [instructor, setInstructor] = useState("");
+  const [meeting, setMeeting] = useState("");
+
+  const addClass = () => {
+    if (!name.trim()) return;
+    const c = {
+      id: uid(),
+      name: name.trim(),
+      code: code.trim(),
+      instructor: instructor.trim(),
+      meeting: meeting.trim(),
+      color: classColor(classes.length),
+      syllabus: null, // stub — real file attach lands with photo/PDF storage work
+      assignments: [],
+      created: Date.now(),
+    };
+    update([...classes, c]);
+    setName(""); setCode(""); setInstructor(""); setMeeting("");
+    setAdding(false);
+  };
+
+  return (
+    <div>
+      <Section
+        title={`CLASSES — ${classes.length}`}
+        action={{ label: adding ? "CANCEL" : "+ ADD CLASS", fn: () => setAdding((a) => !a) }}
+      >
+        {adding && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 2px 18px" }}>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Class name (e.g. Database Systems)"
+              style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 14, color: C.ink }}
+            />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="Course code (e.g. CS 3413)"
+                style={{ flex: "1 1 140px", padding: "8px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 13, color: C.ink }}
+              />
+              <input
+                value={instructor}
+                onChange={(e) => setInstructor(e.target.value)}
+                placeholder="Instructor"
+                style={{ flex: "1 1 140px", padding: "8px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 13, color: C.ink }}
+              />
+              <input
+                value={meeting}
+                onChange={(e) => setMeeting(e.target.value)}
+                placeholder="Meets (e.g. MWF 10:00 AM)"
+                style={{ flex: "1 1 140px", padding: "8px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, fontSize: 13, color: C.ink }}
+              />
+            </div>
+            <div>
+              <SmallBtn onClick={addClass}>Add Class</SmallBtn>
+            </div>
+          </div>
+        )}
+
+        {classes.length === 0 && !adding ? (
+          <Empty>No classes yet. Add one to start tracking assignments.</Empty>
+        ) : (
+          classes.map((c) => (
+            <ClassCard
+              key={c.id}
+              cls={c}
+              onDelete={() => update(classes.filter((x) => x.id !== c.id))}
+              onAddAssignment={(a) =>
+                update(classes.map((x) => (x.id === c.id ? { ...x, assignments: [...x.assignments, a] } : x)))
+              }
+              onToggleAssignment={(aid) =>
+                update(
+                  classes.map((x) =>
+                    x.id === c.id
+                      ? { ...x, assignments: x.assignments.map((a) => (a.id === aid ? { ...a, done: !a.done } : a)) }
+                      : x
+                  )
+                )
+              }
+              onDeleteAssignment={(aid) =>
+                update(
+                  classes.map((x) =>
+                    x.id === c.id ? { ...x, assignments: x.assignments.filter((a) => a.id !== aid) } : x
+                  )
+                )
+              }
+            />
+          ))
+        )}
+      </Section>
+    </div>
+  );
+}
+
+function ClassCard({ cls, onDelete, onAddAssignment, onToggleAssignment, onDeleteAssignment }) {
+  const [open, setOpen] = useState(true);
+  const [draft, setDraft] = useState("");
+  const [due, setDue] = useState("");
+  const openAssignments = cls.assignments.filter((a) => !a.done).sort(byDue);
+  const doneAssignments = cls.assignments.filter((a) => a.done);
+
+  const add = () => {
+    if (!draft.trim()) return;
+    onAddAssignment({ id: uid(), title: draft.trim(), due: due || null, done: false, created: Date.now() });
+    setDraft(""); setDue("");
+  };
+
+  return (
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, marginBottom: 12, overflow: "hidden", background: C.surface }}>
+      <div
+        onClick={() => setOpen((o) => !o)}
+        style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", cursor: "pointer", borderLeft: `4px solid ${cls.color}` }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15.5, fontWeight: 600 }}>{cls.name}</div>
+          <div style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.06em", color: C.muted, marginTop: 2 }}>
+            {[cls.code, cls.instructor, cls.meeting].filter(Boolean).join(" · ")}
+          </div>
+        </div>
+        <span style={{ fontFamily: mono, fontSize: 10.5, color: C.faint, whiteSpace: "nowrap" }}>
+          {openAssignments.length} OPEN
+        </span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          aria-label="Delete class"
+          style={{ background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 14, padding: "2px 4px" }}
+        >
+          ×
+        </button>
+      </div>
+
+      {open && (
+        <div style={{ padding: "0 14px 14px", borderTop: `1px solid ${C.line}` }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && add()}
+              placeholder="Add an assignment"
+              style={{ flex: "2 1 140px", padding: "8px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.ground, fontSize: 13.5, color: C.ink }}
+            />
+            <input
+              type="date"
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+              aria-label="Due date (optional)"
+              style={{ flex: "1 1 110px", padding: "7px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.ground, fontSize: 12.5, color: due ? C.ink : C.faint, fontFamily: mono }}
+            />
+            <SmallBtn onClick={add}>Add</SmallBtn>
+          </div>
+
+          {openAssignments.length === 0 && doneAssignments.length === 0 ? (
+            <Empty>No assignments yet.</Empty>
+          ) : (
+            <div style={{ marginTop: 6 }}>
+              {openAssignments.map((a) => (
+                <TaskRow key={a.id} task={a} onToggle={() => onToggleAssignment(a.id)} onDelete={() => onDeleteAssignment(a.id)} />
+              ))}
+              {doneAssignments.map((a) => (
+                <TaskRow key={a.id} task={a} onToggle={() => onToggleAssignment(a.id)} onDelete={() => onDeleteAssignment(a.id)} />
+              ))}
+            </div>
+          )}
+
+          <div style={{ marginTop: 12, fontFamily: mono, fontSize: 10, letterSpacing: "0.06em", color: C.faint }}>
+            SYLLABUS — attach coming soon (file storage not wired up yet)
+          </div>
+        </div>
+      )}
     </div>
   );
 }
