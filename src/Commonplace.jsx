@@ -1,5 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { loadKey, saveKey } from "./supabase.js";
+import * as pdfjsLib from "pdfjs-dist/build/pdf";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+// reads a PDF entirely client-side, returns plain text — the file itself
+// is never uploaded or stored anywhere, only the extracted text leaves the browser
+async function extractPdfText(file) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map((it) => it.str).join(" ") + "\n";
+  }
+  return text.slice(0, 20000); // keep the request small; syllabi rarely need more
+}
 
 // ————————————————————————————————————————————
 // COMMONPLACE — a private life ledger
@@ -1469,6 +1486,10 @@ function ClassCard({ cls, onDelete, onAddAssignment, onToggleAssignment, onDelet
   const [open, setOpen] = useState(true);
   const [draft, setDraft] = useState("");
   const [due, setDue] = useState("");
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState("");
+  const [review, setReview] = useState(null); // array of {id,title,due,selected} once parsed, else null
+  const fileRef = useRef(null);
   const openAssignments = cls.assignments.filter((a) => !a.done).sort(byDue);
   const doneAssignments = cls.assignments.filter((a) => a.done);
 
@@ -1476,6 +1497,41 @@ function ClassCard({ cls, onDelete, onAddAssignment, onToggleAssignment, onDelet
     if (!draft.trim()) return;
     onAddAssignment({ id: uid(), title: draft.trim(), due: due || null, done: false, created: Date.now() });
     setDraft(""); setDue("");
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    setParseError("");
+    setParsing(true);
+    try {
+      const text = await extractPdfText(file);
+      const res = await fetch("/api/parse-syllabus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error("Server error");
+      const data = await res.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (items.length === 0) {
+        setParseError("No dated assignments found in that PDF.");
+      } else {
+        setReview(items.map((it) => ({ id: uid(), title: it.title || "Untitled", due: it.due || "", selected: true })));
+      }
+    } catch (err) {
+      setParseError("Couldn't parse that PDF. Try again, or add assignments manually.");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const approveReview = () => {
+    review.filter((r) => r.selected && r.title.trim()).forEach((r) => {
+      onAddAssignment({ id: uid(), title: r.title.trim(), due: r.due || null, done: false, created: Date.now() });
+    });
+    setReview(null);
   };
 
   return (
@@ -1535,9 +1591,56 @@ function ClassCard({ cls, onDelete, onAddAssignment, onToggleAssignment, onDelet
             </div>
           )}
 
-          <div style={{ marginTop: 12, fontFamily: mono, fontSize: 10, letterSpacing: "0.06em", color: C.faint }}>
-            SYLLABUS — attach coming soon (file storage not wired up yet)
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+            <MiniLabel>SYLLABUS</MiniLabel>
+            <div style={{ fontFamily: mono, fontSize: 9.5, letterSpacing: "0.05em", color: C.faint, margin: "3px 0 8px" }}>
+              Storing the file itself is coming later — this only reads it once to pull out dates.
+            </div>
+            <input ref={fileRef} type="file" accept="application/pdf" onChange={handleFile} style={{ display: "none" }} />
+            <SmallBtn onClick={() => fileRef.current?.click()}>
+              {parsing ? "Reading…" : "Upload Syllabus PDF"}
+            </SmallBtn>
+            {parseError && (
+              <div style={{ fontFamily: mono, fontSize: 10.5, color: C.danger, marginTop: 8 }}>{parseError}</div>
+            )}
           </div>
+
+          {review && (
+            <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: C.accentSoft }}>
+              <MiniLabel>REVIEW — {review.length} FOUND, NOTHING SAVED YET</MiniLabel>
+              <div style={{ marginTop: 8 }}>
+                {review.map((r) => (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
+                    <input
+                      type="checkbox"
+                      checked={r.selected}
+                      onChange={(e) => setReview(review.map((x) => (x.id === r.id ? { ...x, selected: e.target.checked } : x)))}
+                    />
+                    <input
+                      value={r.title}
+                      onChange={(e) => setReview(review.map((x) => (x.id === r.id ? { ...x, title: e.target.value } : x)))}
+                      style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.surface, fontSize: 13, color: C.ink }}
+                    />
+                    <input
+                      type="date"
+                      value={r.due || ""}
+                      onChange={(e) => setReview(review.map((x) => (x.id === r.id ? { ...x, due: e.target.value } : x)))}
+                      style={{ padding: "6px 8px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.surface, fontSize: 12, fontFamily: mono, color: C.ink }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <SmallBtn onClick={approveReview}>Add Selected to Class</SmallBtn>
+                <button
+                  onClick={() => setReview(null)}
+                  style={{ fontFamily: mono, fontSize: 11, letterSpacing: "0.08em", background: "none", border: "none", color: C.muted, cursor: "pointer" }}
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
