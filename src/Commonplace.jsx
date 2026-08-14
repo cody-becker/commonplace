@@ -1459,6 +1459,9 @@ function Classes({ classes, update }) {
               onAddAssignment={(a) =>
                 update(classes.map((x) => (x.id === c.id ? { ...x, assignments: [...x.assignments, a] } : x)))
               }
+              onAddAssignments={(items) =>
+                update(classes.map((x) => (x.id === c.id ? { ...x, assignments: [...x.assignments, ...items] } : x)))
+              }
               onToggleAssignment={(aid) =>
                 update(
                   classes.map((x) =>
@@ -1483,7 +1486,7 @@ function Classes({ classes, update }) {
   );
 }
 
-function ClassCard({ cls, onDelete, onAddAssignment, onToggleAssignment, onDeleteAssignment }) {
+function ClassCard({ cls, onDelete, onAddAssignment, onAddAssignments, onToggleAssignment, onDeleteAssignment }) {
   const [open, setOpen] = useState(true);
   const [draft, setDraft] = useState("");
   const [due, setDue] = useState("");
@@ -1529,9 +1532,10 @@ function ClassCard({ cls, onDelete, onAddAssignment, onToggleAssignment, onDelet
   };
 
   const approveReview = () => {
-    review.filter((r) => r.selected && r.title.trim()).forEach((r) => {
-      onAddAssignment({ id: uid(), title: r.title.trim(), due: r.due || null, done: false, created: Date.now() });
-    });
+    const toAdd = review
+      .filter((r) => r.selected && r.title.trim())
+      .map((r) => ({ id: uid(), title: r.title.trim(), due: r.due || null, done: false, created: Date.now() }));
+    if (toAdd.length > 0) onAddAssignments(toAdd);
     setReview(null);
   };
 
