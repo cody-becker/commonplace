@@ -294,6 +294,20 @@ export default function Commonplace({ userId, onSignOut }) {
             rituals={rituals} updateRituals={updateRituals}
             ritualState={ritualState} updateRitualState={updateRitualState}
             dayStart={dayStart} updateDayStart={updateDayStart}
+            classes={classes}
+            onQuickAdd={(item) => {
+              if (item.classId) {
+                updateClasses(
+                  classes.map((c) =>
+                    c.id === item.classId
+                      ? { ...c, assignments: [...c.assignments, { id: uid(), title: item.title, due: item.date || null, done: false, created: Date.now() }] }
+                      : c
+                  )
+                );
+              } else {
+                updateEvents([...events, { id: uid(), title: item.title, date: item.date || dateKey(), time: item.time || null }]);
+              }
+            }}
             onQuickNote={(body) => {
               const n = { id: uid(), title: "", body, created: Date.now(), updated: Date.now() };
               updateNotes([n, ...notes]);
@@ -332,6 +346,19 @@ export default function Commonplace({ userId, onSignOut }) {
                 )
               )
             }
+            onQuickAdd={(item) => {
+              if (item.classId) {
+                updateClasses(
+                  classes.map((c) =>
+                    c.id === item.classId
+                      ? { ...c, assignments: [...c.assignments, { id: uid(), title: item.title, due: item.date || null, done: false, created: Date.now() }] }
+                      : c
+                  )
+                );
+              } else {
+                updateEvents([...events, { id: uid(), title: item.title, date: item.date || dateKey(), time: item.time || null }]);
+              }
+            }}
             focusDate={calendarFocus}
           />
         ) : (
@@ -362,6 +389,7 @@ function Today({
   tasks, notes, goals, events,
   links, updateLinks, rituals, updateRituals, ritualState, updateRitualState,
   dayStart, updateDayStart,
+  classes, onQuickAdd,
   onQuickNote, onToggleTask, openNote, goTo, goToDate,
 }) {
   const [capture, setCapture] = useState("");
@@ -404,6 +432,14 @@ function Today({
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
           <span style={{ fontFamily: mono, fontSize: 11, color: C.sage }}>{captured ? "KEPT." : ""}</span>
           <SmallBtn onClick={submit}>Keep it</SmallBtn>
+        </div>
+      </div>
+
+      {/* AI quick add — natural language -> event or class assignment */}
+      <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16, marginTop: 14 }}>
+        <Label>QUICK ADD (AI)</Label>
+        <div style={{ marginTop: 8 }}>
+          <QuickAddAI classes={classes} onAdd={onQuickAdd} />
         </div>
       </div>
 
@@ -879,7 +915,7 @@ function Journal({ journal, update }) {
 // CALENDAR — month grid + upcoming
 // ————————————————————————————————————————————
 
-function Calendar({ events, update, tasks, updateTasks, classes, onToggleClassAssignment, focusDate }) {
+function Calendar({ events, update, tasks, updateTasks, classes, onToggleClassAssignment, onQuickAdd, focusDate }) {
   const today = dateKey();
   const [cursor, setCursor] = useState(() => {
     const base = focusDate ? parseKey(focusDate) : new Date();
@@ -955,6 +991,14 @@ function Calendar({ events, update, tasks, updateTasks, classes, onToggleClassAs
         <button onClick={() => setCursor(new Date(y, m - 1, 1))} aria-label="Previous month" style={navBtn}>‹</button>
         <h2 style={{ fontFamily: serif, fontStyle: "italic", fontWeight: 500, fontSize: 22, margin: 0 }}>{monthLabel}</h2>
         <button onClick={() => setCursor(new Date(y, m + 1, 1))} aria-label="Next month" style={navBtn}>›</button>
+      </div>
+
+      {/* AI quick add */}
+      <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 14, marginBottom: 12 }}>
+        <Label>QUICK ADD (AI)</Label>
+        <div style={{ marginTop: 8 }}>
+          <QuickAddAI classes={classes} onAdd={onQuickAdd} />
+        </div>
       </div>
 
       {/* grid */}
@@ -1442,6 +1486,125 @@ function Goals({ goals, update }) {
           </Section>
         );
       })}
+    </div>
+  );
+}
+
+// ————————————————————————————————————————————
+// QUICK ADD (AI) — natural language -> event or class assignment
+// ————————————————————————————————————————————
+
+function QuickAddAI({ classes, onAdd }) {
+  const [text, setText] = useState("");
+  const [parsing, setParsing] = useState(false);
+  const [error, setError] = useState("");
+  const [review, setReview] = useState(null); // { title, date, time, classId }
+
+  const ask = async () => {
+    if (!text.trim() || parsing) return;
+    setError("");
+    setParsing(true);
+    try {
+      const res = await fetch("/api/parse-quickadd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: text.trim(),
+          today: dateKey(),
+          classes: classes.map((c) => ({ id: c.id, name: c.name, code: c.code })),
+        }),
+      });
+      if (!res.ok) throw new Error("Server error");
+      const data = await res.json();
+      setReview({
+        title: data.title || text.trim(),
+        date: data.date || "",
+        time: data.time || "",
+        classId: data.classId || "",
+      });
+    } catch (err) {
+      setError("Couldn't parse that. Try rephrasing, or add it manually.");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const confirm = () => {
+    if (!review.title.trim()) return;
+    onAdd({
+      title: review.title.trim(),
+      date: review.date || null,
+      time: review.time || null,
+      classId: review.classId || null,
+    });
+    setReview(null);
+    setText("");
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && ask()}
+          placeholder='Try "quiz in calc this friday"'
+          style={{ flex: "1 1 200px", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.ground, fontSize: 13.5, color: C.ink }}
+        />
+        <SmallBtn onClick={ask}>{parsing ? "Thinking…" : "Ask AI"}</SmallBtn>
+      </div>
+
+      {error && (
+        <div style={{ fontFamily: mono, fontSize: 10.5, color: C.danger, marginTop: 8 }}>{error}</div>
+      )}
+
+      {review && (
+        <div style={{ marginTop: 10, padding: 12, borderRadius: 8, background: C.accentSoft }}>
+          <MiniLabel>REVIEW — NOTHING SAVED YET</MiniLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+            <input
+              value={review.title}
+              onChange={(e) => setReview({ ...review, title: e.target.value })}
+              placeholder="Title"
+              style={{ padding: "8px 10px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.surface, fontSize: 13.5, color: C.ink }}
+            />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input
+                type="date"
+                value={review.date || ""}
+                onChange={(e) => setReview({ ...review, date: e.target.value })}
+                style={{ padding: "7px 10px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.surface, fontSize: 12.5, fontFamily: mono, color: review.date ? C.ink : C.faint }}
+              />
+              <input
+                type="time"
+                value={review.time || ""}
+                onChange={(e) => setReview({ ...review, time: e.target.value })}
+                aria-label="Time (optional)"
+                style={{ padding: "7px 10px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.surface, fontSize: 12.5, fontFamily: mono, color: review.time ? C.ink : C.faint }}
+              />
+              <select
+                value={review.classId || ""}
+                onChange={(e) => setReview({ ...review, classId: e.target.value })}
+                style={{ flex: "1 1 160px", padding: "7px 10px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.surface, fontSize: 12.5, color: C.ink }}
+              >
+                <option value="">No class (general event)</option>
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>{c.code ? `${c.code} — ${c.name}` : c.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+            <SmallBtn onClick={confirm}>Confirm & Add</SmallBtn>
+            <button
+              onClick={() => setReview(null)}
+              style={{ fontFamily: mono, fontSize: 11, letterSpacing: "0.08em", background: "none", border: "none", color: C.muted, cursor: "pointer" }}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
