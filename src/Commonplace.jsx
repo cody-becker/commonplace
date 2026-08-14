@@ -320,7 +320,20 @@ export default function Commonplace({ userId, onSignOut }) {
         ) : view === "classes" ? (
           <Classes classes={classes} update={updateClasses} />
         ) : view === "calendar" ? (
-          <Calendar events={events} update={updateEvents} tasks={tasks} updateTasks={updateTasks} focusDate={calendarFocus} />
+          <Calendar
+            events={events} update={updateEvents} tasks={tasks} updateTasks={updateTasks}
+            classes={classes}
+            onToggleClassAssignment={(classId, aid) =>
+              updateClasses(
+                classes.map((c) =>
+                  c.id === classId
+                    ? { ...c, assignments: c.assignments.map((a) => (a.id === aid ? { ...a, done: !a.done } : a)) }
+                    : c
+                )
+              )
+            }
+            focusDate={calendarFocus}
+          />
         ) : (
           <Goals goals={goals} update={updateGoals} />
         )}
@@ -866,7 +879,7 @@ function Journal({ journal, update }) {
 // CALENDAR — month grid + upcoming
 // ————————————————————————————————————————————
 
-function Calendar({ events, update, tasks, updateTasks, focusDate }) {
+function Calendar({ events, update, tasks, updateTasks, classes, onToggleClassAssignment, focusDate }) {
   const today = dateKey();
   const [cursor, setCursor] = useState(() => {
     const base = focusDate ? parseKey(focusDate) : new Date();
@@ -882,9 +895,17 @@ function Calendar({ events, update, tasks, updateTasks, focusDate }) {
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const monthLabel = cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-  const byDate = {};
-  for (const e of events) byDate[e.date] = (byDate[e.date] || 0) + 1;
-  for (const t of tasks) if (t.due && !t.done) byDate[t.due] = (byDate[t.due] || 0) + 1;
+  // per-day dot colors — events/tasks share the generic accent dot,
+  // each class's assignments get that class's own color so due days are distinguishable at a glance
+  const dotsByDate = {};
+  const addDot = (date, color) => {
+    if (!date) return;
+    if (!dotsByDate[date]) dotsByDate[date] = [];
+    if (!dotsByDate[date].includes(color)) dotsByDate[date].push(color);
+  };
+  for (const e of events) addDot(e.date, C.accent);
+  for (const t of tasks) if (t.due && !t.done) addDot(t.due, C.accent);
+  for (const c of classes) for (const a of c.assignments) if (a.due && !a.done) addDot(a.due, c.color);
 
   const cells = [];
   for (let i = 0; i < firstDow; i++) cells.push(null);
@@ -909,9 +930,18 @@ function Calendar({ events, update, tasks, updateTasks, focusDate }) {
     .filter((t) => t.due === sel)
     .sort((a, b) => Number(a.done) - Number(b.done));
 
+  const dayAssignments = classes
+    .flatMap((c) => c.assignments.filter((a) => a.due === sel).map((a) => ({ ...a, classId: c.id, classCode: c.code || c.name, classColor: c.color })))
+    .sort((a, b) => Number(a.done) - Number(b.done));
+
   const upcoming = [
     ...events.filter((e) => e.date >= today).map((e) => ({ ...e, kind: "event" })),
     ...tasks.filter((t) => t.due && !t.done && t.due >= today).map((t) => ({ id: t.id, title: t.title, date: t.due, time: null, kind: "task" })),
+    ...classes.flatMap((c) =>
+      c.assignments
+        .filter((a) => a.due && !a.done && a.due >= today)
+        .map((a) => ({ id: a.id, title: a.title, date: a.due, time: null, kind: "assignment", classCode: c.code || c.name, classColor: c.color }))
+    ),
   ]
     .sort((a, b) => (a.date + (a.time || "99")).localeCompare(b.date + (b.time || "99")))
     .slice(0, 8);
@@ -942,7 +972,7 @@ function Calendar({ events, update, tasks, updateTasks, focusDate }) {
             const k = keyFor(d);
             const isSel = k === sel;
             const isToday = k === today;
-            const has = byDate[k];
+            const dots = (dotsByDate[k] || []).slice(0, 4);
             return (
               <button
                 key={k}
@@ -958,7 +988,11 @@ function Calendar({ events, update, tasks, updateTasks, focusDate }) {
                 }}
               >
                 <span>{d}</span>
-                <span style={{ width: 4, height: 4, borderRadius: "50%", background: has ? C.accent : "transparent" }} />
+                <span style={{ display: "flex", gap: 2, height: 4 }}>
+                  {dots.map((color, i) => (
+                    <span key={i} style={{ width: 4, height: 4, borderRadius: "50%", background: color }} />
+                  ))}
+                </span>
               </button>
             );
           })}
@@ -987,7 +1021,32 @@ function Calendar({ events, update, tasks, updateTasks, focusDate }) {
             <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: "0.08em", color: C.faint }}>DUE</span>
           </div>
         ))}
-        {dayEvents.length === 0 && dayTasks.length === 0 ? (
+        {dayAssignments.map((a) => (
+          <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 2px", borderBottom: `1px solid ${C.line}` }}>
+            <button
+              onClick={() => onToggleClassAssignment(a.classId, a.id)}
+              aria-label={a.done ? "Mark not done" : "Mark done"}
+              style={{
+                width: 18, height: 18, borderRadius: 5, flexShrink: 0, cursor: "pointer",
+                border: `1.5px solid ${a.done ? C.sage : C.faint}`,
+                background: a.done ? C.sage : "transparent",
+                color: C.surface, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              {a.done ? "✓" : ""}
+            </button>
+            <span style={{ flex: 1, fontSize: 15, color: a.done ? C.faint : C.ink, textDecoration: a.done ? "line-through" : "none" }}>
+              {a.title}
+            </span>
+            <span style={{
+              fontFamily: mono, fontSize: 9.5, letterSpacing: "0.06em", whiteSpace: "nowrap",
+              color: a.classColor, border: `1px solid ${a.classColor}`, borderRadius: 4, padding: "1px 5px",
+            }}>
+              {a.classCode}
+            </span>
+          </div>
+        ))}
+        {dayEvents.length === 0 && dayTasks.length === 0 && dayAssignments.length === 0 ? (
           <Empty>Nothing planned. Some of the best days aren't.</Empty>
         ) : (
           dayEvents.map((e) => (
@@ -1048,6 +1107,14 @@ function Calendar({ events, update, tasks, updateTasks, focusDate }) {
               <span style={{ fontSize: 15, flex: 1 }}>{e.title}</span>
               {e.kind === "task" && (
                 <span style={{ fontFamily: mono, fontSize: 9.5, letterSpacing: "0.1em", color: C.faint, border: `1px solid ${C.line}`, borderRadius: 4, padding: "1px 5px" }}>TASK</span>
+              )}
+              {e.kind === "assignment" && (
+                <span style={{
+                  fontFamily: mono, fontSize: 9.5, letterSpacing: "0.06em", whiteSpace: "nowrap",
+                  color: e.classColor, border: `1px solid ${e.classColor}`, borderRadius: 4, padding: "1px 5px",
+                }}>
+                  {e.classCode}
+                </span>
               )}
             </button>
           ))}
